@@ -1,0 +1,23 @@
+# =============================================================================
+# variables.example.toml — Fermyon Spin runtime variables
+# Copy to variables.toml (gitignored) and fill in your values.
+#
+# For local testing:
+#   spin up --runtime-config-file variables.toml
+#
+# For Fermyon Cloud deployment:
+#   spin deploy --variable chicago_vllm_url="http://..." \
+#               --variable seattle_vllm_url="http://..." \
+#               --variable allowed_admin_cidr="YOUR_IP/32"
+# =============================================================================
+
+[variables]
+# Chicago vLLM LoadBalancer IP (from: kubectl get svc vllm -n inference --context=chicago)
+chicago_vllm_url = "http://CHICAGO_LB_IP:8000"
+
+# Seattle vLLM LoadBalancer IP (from: kubectl get svc vllm -n inference --context=seattle)
+seattle_vllm_url = "http://SEATTLE_LB_IP:8000"
+
+# Your public IP — ALL requests from other IPs will return 403
+# Get your IP: curl -s https://api.ipify.org
+allowed_admin_cidr = "SEU_IP_PUBLICO/32"

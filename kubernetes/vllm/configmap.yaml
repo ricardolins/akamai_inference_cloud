@@ -1,0 +1,50 @@
+# =============================================================================
+# vllm/configmap.yaml — vLLM runtime configuration
+#
+# Model choice: mistralai/Mistral-7B-Instruct-v0.3
+#   - License: Apache 2.0 (open, commercial use allowed)
+#   - VRAM required: ~14GB (FP16) — fits in 20GB RTX 4000 Ada with buffer
+#   - Context length: 4096 (safe for 20GB; 8192 risks OOM)
+#   - Performance: ~25-40 tokens/sec on RTX 4000 Ada
+#
+# To change model: update MODEL_NAME below, then rollout restart deployment.
+# See docs/INFERENCE_RUNTIME.md for model selection guide.
+# =============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vllm-config
+  namespace: inference
+  labels:
+    app: vllm
+    app.kubernetes.io/part-of: akai-inference
+data:
+  # ── Model ──────────────────────────────────────────────────────────────────
+  MODEL_NAME: "mistralai/Mistral-7B-Instruct-v0.3"
+
+  # ── Context Window ─────────────────────────────────────────────────────────
+  # 4096 = safe. 8192 = possible OOM on 20GB. Do not exceed without testing.
+  MAX_MODEL_LEN: "4096"
+
+  # ── GPU Memory ─────────────────────────────────────────────────────────────
+  # 0.90 = 90% of 20GB = 18GB for model + KV cache. Leaves 2GB OS/driver margin.
+  GPU_MEMORY_UTILIZATION: "0.90"
+
+  # ── Concurrency ────────────────────────────────────────────────────────────
+  # Max concurrent requests. Higher = more memory pressure.
+  MAX_NUM_SEQS: "16"
+
+  # ── Tensor Parallelism ─────────────────────────────────────────────────────
+  # 1 = single GPU (RTX 4000 Ada has 1 GPU per node)
+  TENSOR_PARALLEL_SIZE: "1"
+
+  # ── Quantization ───────────────────────────────────────────────────────────
+  # Options: none | awq | gptq | squeezellm
+  # "none" = FP16, best quality, uses ~14GB
+  # "awq"  = 4-bit, uses ~4GB, slight quality loss, faster on some models
+  QUANTIZATION: "none"
+
+  # ── Data Type ──────────────────────────────────────────────────────────────
+  # float16 = standard for RTX 4000 Ada (no bfloat16 native on Ada for inference)
+  DTYPE: "float16"

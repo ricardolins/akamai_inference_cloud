@@ -1,0 +1,29 @@
+# =============================================================================
+# terraform.tfvars.example
+# Copy to terraform.tfvars and fill in your values.
+# NEVER commit terraform.tfvars — it contains your IP.
+# =============================================================================
+
+# ── REQUIRED ─────────────────────────────────────────────────────────────────
+
+# Your public IP restricted access. Get it with: curl -s https://api.ipify.org
+# ALL services (vLLM, Grafana, Prometheus, Router) will be locked to this IP.
+allowed_admin_cidr = "SEU_IP_PUBLICO/32"
+
+# ── OPTIONAL OVERRIDES ────────────────────────────────────────────────────────
+
+# Regions (defaults are correct for Chicago + Seattle)
+# chicago_region = "us-ord"
+# seattle_region = "us-sea"
+
+# GPU node type — verify with: linode-cli linodes types | grep gpu
+# gpu_node_type = "g1-gpu-rtx4000ada-1"
+
+# Number of GPU nodes per cluster (1 = minimum cost)
+# gpu_nodes_per_cluster = 1
+
+# Kubernetes version
+# k8s_version = "1.31"
+
+# Project prefix for resource names
+# project_name = "akai-inference"

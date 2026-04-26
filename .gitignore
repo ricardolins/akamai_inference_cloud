@@ -1,0 +1,54 @@
+# Terraform
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/terraform.tfvars
+*.tfvars
+!*.tfvars.example
+
+# Kubeconfig
+kubeconfig*.yaml
+*.kubeconfig
+
+# Secrets
+*.token
+*.key
+.env
+.env.*
+!.env.example
+secrets/
+
+# Node
+node_modules/
+npm-debug.log*
+dist/
+build/
+
+# Fermyon / Spin build artifacts
+fermyon/.spin/
+fermyon/dist/
+*.wasm
+
+# Fermyon runtime variables (contain real IPs / CIDRs)
+fermyon/variables.toml
+fermyon/deploy-vars.toml
+
+# k6 results
+k6/results/
+*.json.gz
+
+# OS
+.DS_Store
+*.swp
+*.swo
+Thumbs.db
+
+# Editor
+.vscode/settings.json
+.idea/
+*.iml
+
+# Logs
+*.log
+logs/

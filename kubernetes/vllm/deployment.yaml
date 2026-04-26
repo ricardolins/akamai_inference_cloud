@@ -1,0 +1,248 @@
+# =============================================================================
+# vllm/deployment.yaml — vLLM OpenAI-compatible inference server
+#
+# Exposes OpenAI-compatible API on port 8000:
+#   POST /v1/chat/completions
+#   POST /v1/completions
+#   GET  /v1/models
+#   GET  /health
+#
+# Startup takes 3-8 minutes on first run (model download from HuggingFace).
+# Subsequent starts are faster if PVC is used for model cache (see PVC section).
+# =============================================================================
+
+---
+# Optional: HuggingFace token for gated models (Llama 3, etc.)
+# Not required for Mistral 7B (Apache 2.0, public)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hf-secret
+  namespace: inference
+type: Opaque
+stringData:
+  # Leave empty for public models. Set for gated models (Llama 3, etc.)
+  # kubectl create secret generic hf-secret --from-literal=token=hf_xxx -n inference
+  token: ""
+
+---
+# PVC for model cache — avoids re-downloading 14GB on every pod restart
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vllm-model-cache
+  namespace: inference
+  labels:
+    app: vllm
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # Mistral 7B FP16 = ~14GB. 50GB provides headroom for model swaps.
+      storage: 50Gi
+  storageClassName: linode-block-storage-retain
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  namespace: inference
+  labels:
+    app: vllm
+    app.kubernetes.io/part-of: akai-inference
+    version: v0.6.3
+spec:
+  # Single replica: one GPU per node, one node per cluster
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm
+  strategy:
+    type: Recreate  # GPU is not shareable; Recreate ensures clean release
+  template:
+    metadata:
+      labels:
+        app: vllm
+        version: v0.6.3
+      annotations:
+        # Prometheus will scrape this pod directly (no ServiceMonitor needed)
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Tolerate the GPU taint that GPU Operator may apply
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+
+      # Prefer to schedule on GPU nodes
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+
+      # Give the model time to download and load (up to 20 minutes)
+      terminationGracePeriodSeconds: 60
+
+      # Prevent Kubernetes from injecting VLLM_PORT env var from the vllm Service
+      # (Kubernetes service discovery injects <SVC_NAME>_PORT=tcp://..., which
+      # conflicts with vLLM's own VLLM_PORT integer env var)
+      enableServiceLinks: false
+
+      initContainers:
+        # Wait for GPU Operator to finish setting up the device plugin
+        - name: wait-for-gpu
+          image: bitnami/kubectl:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Waiting for GPU device plugin to be ready..."
+              until kubectl get node -o jsonpath='{.items[0].status.allocatable.nvidia\.com/gpu}' | grep -q "1"; do
+                echo "  GPU not ready yet, waiting 10s..."
+                sleep 10
+              done
+              echo "GPU is ready."
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+
+      containers:
+        - name: vllm
+          # Pin to a specific version for reproducibility
+          image: vllm/vllm-openai:v0.6.3
+          imagePullPolicy: IfNotPresent
+
+          command:
+            - python3
+            - -m
+            - vllm.entrypoints.openai.api_server
+
+          args:
+            - "--model"
+            - "$(MODEL_NAME)"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "8000"
+            - "--max-model-len"
+            - "$(MAX_MODEL_LEN)"
+            - "--gpu-memory-utilization"
+            - "$(GPU_MEMORY_UTILIZATION)"
+            - "--max-num-seqs"
+            - "$(MAX_NUM_SEQS)"
+            - "--tensor-parallel-size"
+            - "$(TENSOR_PARALLEL_SIZE)"
+            - "--dtype"
+            - "$(DTYPE)"
+            - "--served-model-name"
+            - "$(MODEL_NAME)"
+            # Disable usage stats (no external calls)
+            - "--disable-log-stats"
+            # Trust remote code for some models (set to false for safety unless needed)
+            # - "--trust-remote-code"
+
+          env:
+            - name: MODEL_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: vllm-config
+                  key: MODEL_NAME
+            - name: MAX_MODEL_LEN
+              valueFrom:
+                configMapKeyRef:
+                  name: vllm-config
+                  key: MAX_MODEL_LEN
+            - name: GPU_MEMORY_UTILIZATION
+              valueFrom:
+                configMapKeyRef:
+                  name: vllm-config
+                  key: GPU_MEMORY_UTILIZATION
+            - name: MAX_NUM_SEQS
+              valueFrom:
+                configMapKeyRef:
+                  name: vllm-config
+                  key: MAX_NUM_SEQS
+            - name: TENSOR_PARALLEL_SIZE
+              valueFrom:
+                configMapKeyRef:
+                  name: vllm-config
+                  key: TENSOR_PARALLEL_SIZE
+            - name: DTYPE
+              valueFrom:
+                configMapKeyRef:
+                  name: vllm-config
+                  key: DTYPE
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-secret
+                  key: token
+                  optional: true
+            # HuggingFace cache directory — mapped to PVC
+            - name: HF_HOME
+              value: "/model-cache"
+            # Disable HF telemetry
+            - name: HF_HUB_DISABLE_TELEMETRY
+              value: "1"
+            # Disable vLLM analytics
+            - name: VLLM_NO_USAGE_STATS
+              value: "1"
+
+          ports:
+            - name: api
+              containerPort: 8000
+              protocol: TCP
+
+          resources:
+            requests:
+              nvidia.com/gpu: "1"
+              memory: "5Gi"
+              cpu: "2"
+            limits:
+              nvidia.com/gpu: "1"
+              memory: "12Gi"
+              cpu: "3500m"
+
+          volumeMounts:
+            - name: model-cache
+              mountPath: /model-cache
+            - name: shm
+              mountPath: /dev/shm
+
+          # vLLM takes 3-8 min to start (model loading)
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 40  # 60 + 40*15 = 660s = 11 min max startup time
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 5
+
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: vllm-model-cache
+        # Shared memory for PyTorch tensor operations
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 4Gi

@@ -1,0 +1,25 @@
+# =============================================================================
+# router/service.yaml — Exposes the fallback router via LoadBalancer
+# SECURITY: loadBalancerSourceRanges restricts to allowed_admin_cidr
+# =============================================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference-router
+  namespace: inference
+  labels:
+    app: inference-router
+    app.kubernetes.io/part-of: akai-inference
+spec:
+  type: LoadBalancer
+  loadBalancerSourceRanges:
+    - "ALLOWED_ADMIN_CIDR_PLACEHOLDER"
+  selector:
+    app: inference-router
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+  externalTrafficPolicy: Local

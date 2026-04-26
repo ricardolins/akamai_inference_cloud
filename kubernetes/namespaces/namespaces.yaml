@@ -1,0 +1,31 @@
+# =============================================================================
+# namespaces.yaml — Project namespaces
+# Apply first before any other workloads.
+# =============================================================================
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: inference
+  labels:
+    app.kubernetes.io/part-of: akai-inference
+    purpose: ai-inference
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    app.kubernetes.io/part-of: akai-inference
+    purpose: observability
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gpu-operator
+  labels:
+    app.kubernetes.io/part-of: akai-inference
+    purpose: gpu-lifecycle

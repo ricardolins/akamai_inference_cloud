@@ -1,0 +1,135 @@
+# =============================================================================
+# gpu-operator/values.yaml — NVIDIA GPU Operator Helm values
+#
+# Install command:
+#   helm repo add nvidia https://helm.ngc.nvidia.com/nvidia
+#   helm repo update
+#   helm upgrade --install gpu-operator nvidia/gpu-operator \
+#     --namespace gpu-operator \
+#     --create-namespace \
+#     -f kubernetes/gpu-operator/values.yaml \
+#     --wait --timeout=15m
+#
+# RTX 4000 Ada Ada Lovelace architecture — requires driver >= 525.105
+# DCGM Exporter is enabled for Prometheus metrics.
+# =============================================================================
+
+# Use the default containerd runtime (LKE uses containerd)
+operator:
+  defaultRuntime: containerd
+  cleanupCRD: false
+  upgradeCRD: true
+
+# Install the NVIDIA GPU driver on each node automatically
+driver:
+  enabled: true
+  # Use the recommended production branch for Ada Lovelace
+  version: "535.154.05"
+  manager:
+    image:
+      repository: nvcr.io/nvidia/cloud-native/k8s-driver-manager
+      tag: v0.6.4
+
+# Container toolkit for GPU-aware container runtime
+toolkit:
+  enabled: true
+  version: v1.14.6-centos7
+
+# Device plugin — exposes nvidia.com/gpu resource in Kubernetes
+devicePlugin:
+  enabled: true
+  version: v0.14.5
+  config:
+    name: time-slicing-config
+    default: "any"
+    data:
+      # No time-slicing for inference: each pod gets exclusive GPU access
+      any: |-
+        version: v1
+        flags:
+          migStrategy: none
+
+# DCGM (Data Center GPU Manager) — full GPU health and metrics
+dcgm:
+  enabled: true
+  # Standalone DCGM for richer metrics (vs. embedded)
+  hostEngine:
+    enabled: false
+
+# DCGM Exporter — Prometheus-compatible GPU metrics endpoint
+dcgmExporter:
+  enabled: true
+  version: 3.3.5-3.4.0-ubuntu22.04
+  serviceMonitor:
+    # ServiceMonitor for Prometheus Operator auto-discovery
+    enabled: true
+    labels:
+      release: prometheus
+  # Custom metrics profile: GPU util, memory, temperature, power
+  config:
+    name: dcgm-metrics-config
+    data: |
+      # DCGM_FI_DEV_GPU_UTIL: GPU core utilization %
+      DCGM_FI_DEV_GPU_UTIL,      gauge, GPU utilization (%)
+      # DCGM_FI_DEV_MEM_COPY_UTIL: Memory bandwidth utilization
+      DCGM_FI_DEV_MEM_COPY_UTIL, gauge, Memory copy utilization (%)
+      # DCGM_FI_DEV_ENC_UTIL: Encoder utilization (less relevant for inference)
+      DCGM_FI_DEV_ENC_UTIL,      gauge, Encoder utilization (%)
+      # DCGM_FI_DEV_DEC_UTIL: Decoder utilization
+      DCGM_FI_DEV_DEC_UTIL,      gauge, Decoder utilization (%)
+      # DCGM_FI_DEV_FB_FREE: Free framebuffer (VRAM) in MB
+      DCGM_FI_DEV_FB_FREE,       gauge, VRAM free (MB)
+      # DCGM_FI_DEV_FB_USED: Used framebuffer (VRAM) in MB
+      DCGM_FI_DEV_FB_USED,       gauge, VRAM used (MB)
+      # DCGM_FI_DEV_GPU_TEMP: GPU die temperature in Celsius
+      DCGM_FI_DEV_GPU_TEMP,      gauge, GPU temperature (C)
+      # DCGM_FI_DEV_POWER_USAGE: Power draw in watts
+      DCGM_FI_DEV_POWER_USAGE,   gauge, Power usage (W)
+      # DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION: Cumulative energy in mJ
+      DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION, counter, Total energy consumed (mJ)
+      # DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL: NVLink bandwidth (N/A for RTX 4000 Ada)
+      DCGM_FI_DEV_PCIE_TX_THROUGHPUT, counter, PCIe TX throughput (KB/s)
+      DCGM_FI_DEV_PCIE_RX_THROUGHPUT, counter, PCIe RX throughput (KB/s)
+      # DCGM_FI_DEV_SM_CLOCK: SM clock frequency in MHz
+      DCGM_FI_DEV_SM_CLOCK,      gauge, SM clock (MHz)
+      # DCGM_FI_DEV_MEM_CLOCK: Memory clock in MHz
+      DCGM_FI_DEV_MEM_CLOCK,     gauge, Memory clock (MHz)
+      # ECC errors — important for production
+      DCGM_FI_DEV_ECC_SBE_VOL_TOTAL, counter, ECC single-bit errors (volatile)
+      DCGM_FI_DEV_ECC_DBE_VOL_TOTAL, counter, ECC double-bit errors (volatile)
+
+# GPU Feature Discovery — auto-labels nodes with GPU capabilities
+gfd:
+  enabled: true
+
+# MIG (Multi-Instance GPU) — NOT supported on RTX 4000 Ada (consumer/workstation GPU)
+mig:
+  strategy: none
+
+migManager:
+  enabled: false
+
+# Node Feature Discovery — discovers hardware features
+nfd:
+  enabled: true
+
+# Validator runs a CUDA workload to verify GPU is functional post-install
+validator:
+  enabled: true
+  plugin:
+    env:
+      - name: WITH_WORKLOAD
+        value: "true"
+  driver:
+    env:
+      - name: DISABLE_DEV_CHAR_SYMLINK_CREATION
+        value: "false"
+
+# Container device interface — needed for containerd
+cdi:
+  enabled: false
+  default: false
+
+# Resource manager
+resourceManager:
+  enabled: false

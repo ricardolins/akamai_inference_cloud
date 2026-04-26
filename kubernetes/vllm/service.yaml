@@ -1,0 +1,39 @@
+# =============================================================================
+# vllm/service.yaml — Exposes vLLM via Linode NodeBalancer (LoadBalancer)
+#
+# SECURITY: loadBalancerSourceRanges restricts access to allowed_admin_cidr.
+# Replace ALLOWED_ADMIN_CIDR_PLACEHOLDER with your IP before applying:
+#   sed -i 's|ALLOWED_ADMIN_CIDR_PLACEHOLDER|200.100.50.25/32|g' service.yaml
+#
+# The deploy-all.sh script does this substitution automatically.
+# =============================================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm
+  namespace: inference
+  labels:
+    app: vllm
+    app.kubernetes.io/part-of: akai-inference
+  annotations:
+    # Linode NodeBalancer annotations
+    service.beta.kubernetes.io/linode-loadbalancer-throttle: "15"
+    # Preserve client IP so application-level IP filtering can also work
+    service.beta.kubernetes.io/linode-loadbalancer-proxy-protocol: "none"
+spec:
+  type: LoadBalancer
+  # ── SECURITY: Only your IP can reach this service ──────────────────────────
+  # This is enforced at the Linode NodeBalancer level (cloud provider).
+  # Any request from outside this CIDR is dropped before reaching the pod.
+  loadBalancerSourceRanges:
+    - "ALLOWED_ADMIN_CIDR_PLACEHOLDER"
+  selector:
+    app: vllm
+  ports:
+    - name: api
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+  # Use Local to preserve client source IP (required for IP filtering at app level)
+  externalTrafficPolicy: Local

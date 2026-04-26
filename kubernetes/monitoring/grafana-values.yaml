@@ -1,0 +1,109 @@
+# =============================================================================
+# monitoring/grafana-values.yaml — Grafana Helm values (standalone)
+#
+# Install command:
+#   helm repo add grafana https://grafana.github.io/helm-charts
+#   helm upgrade --install grafana grafana/grafana \
+#     --namespace monitoring \
+#     -f kubernetes/monitoring/grafana-values.yaml \
+#     --wait
+#
+# Default credentials: admin / admin (change on first login)
+# Access: http://<LB-IP>:3000
+# =============================================================================
+
+# ── Service — LoadBalancer, IP-restricted ─────────────────────────────────────
+service:
+  type: LoadBalancer
+  port: 3000
+  targetPort: 3000
+  # SECURITY: Replace via deploy-all.sh
+  loadBalancerSourceRanges:
+    - "ALLOWED_ADMIN_CIDR_PLACEHOLDER"
+  annotations:
+    service.beta.kubernetes.io/linode-loadbalancer-throttle: "10"
+
+# ── Admin credentials ─────────────────────────────────────────────────────────
+adminUser: admin
+adminPassword: "admin"  # Change after first login
+
+# ── Persistence ───────────────────────────────────────────────────────────────
+persistence:
+  enabled: true
+  size: 5Gi
+  storageClassName: linode-block-storage-retain
+
+# ── Datasources ───────────────────────────────────────────────────────────────
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        url: http://prometheus-kube-prometheus-prometheus.monitoring.svc:9090
+        access: proxy
+        isDefault: true
+        jsonData:
+          timeInterval: "15s"
+          queryTimeout: "60s"
+          httpMethod: POST
+
+# ── Dashboard providers ───────────────────────────────────────────────────────
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+      - name: "akai-inference"
+        orgId: 1
+        folder: "Akamai Inference Cloud"
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/akai-inference
+
+# ── Dashboards from ConfigMap ─────────────────────────────────────────────────
+dashboardsConfigMaps:
+  akai-inference: "grafana-dashboards"
+
+# ── Pre-installed community dashboards ────────────────────────────────────────
+dashboards:
+  default:
+    # NVIDIA DCGM Exporter dashboard (official)
+    dcgm-exporter:
+      gnetId: 12239
+      revision: 2
+      datasource: Prometheus
+    # Kubernetes cluster overview
+    k8s-cluster:
+      gnetId: 7249
+      revision: 1
+      datasource: Prometheus
+    # Node exporter full
+    node-exporter:
+      gnetId: 1860
+      revision: 37
+      datasource: Prometheus
+
+# ── Grafana config ────────────────────────────────────────────────────────────
+grafana.ini:
+  server:
+    # No domain — access by IP only
+    domain: ""
+    root_url: "%(protocol)s://%(domain)s:%(http_port)s/"
+  security:
+    allow_embedding: true
+  auth.anonymous:
+    enabled: false
+  analytics:
+    reporting_enabled: false
+    check_for_updates: false
+
+# ── Resources ─────────────────────────────────────────────────────────────────
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "100m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"

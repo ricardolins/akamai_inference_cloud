@@ -1,0 +1,35 @@
+spin_manifest_version = 2
+
+[application]
+name        = "akai-inference-router"
+version     = "1.0.0"
+description = "Multi-region AI inference router — Chicago (us-ord) + Seattle (us-sea)"
+authors     = ["Akamai Inference Cloud"]
+
+[variables]
+chicago_vllm_url   = { required = true }
+seattle_vllm_url   = { required = true }
+allowed_admin_cidr = { default = "127.0.0.1/32" }
+
+[application.trigger.http]
+base = "/"
+
+[[trigger.http]]
+route     = "/..."
+component = "router"
+
+[component.router]
+source = "dist/router.wasm"
+allowed_outbound_hosts = [
+  "http://172.238.162.106:8000",
+  "http://172.232.182.27:8000",
+]
+
+[component.router.variables]
+chicago_vllm_url    = "{{ chicago_vllm_url }}"
+seattle_vllm_url    = "{{ seattle_vllm_url }}"
+allowed_admin_cidr  = "{{ allowed_admin_cidr }}"
+
+[component.router.build]
+command = "mkdir -p dist && spin js2wasm -o dist/router.wasm src/router.js"
+workdir = "."

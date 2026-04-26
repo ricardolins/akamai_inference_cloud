@@ -1,0 +1,116 @@
+# =============================================================================
+# router/deployment.yaml — Node.js fallback router
+# Routes requests to Chicago or Seattle vLLM based on health + round-robin.
+# Falls back to the other region automatically if primary is unhealthy.
+# =============================================================================
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: router-config
+  namespace: inference
+data:
+  # IPs are set by deploy-all.sh from kubectl get svc output
+  CHICAGO_VLLM_URL: "http://CHICAGO_VLLM_IP_PLACEHOLDER:8000"
+  SEATTLE_VLLM_URL: "http://SEATTLE_VLLM_IP_PLACEHOLDER:8000"
+  # allowed_admin_cidr for application-level IP validation
+  ALLOWED_ADMIN_CIDR: "ALLOWED_ADMIN_CIDR_PLACEHOLDER"
+  # Health check interval in ms
+  HEALTH_CHECK_INTERVAL: "10000"
+  # Request timeout in ms
+  REQUEST_TIMEOUT: "120000"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-router
+  namespace: inference
+  labels:
+    app: inference-router
+    app.kubernetes.io/part-of: akai-inference
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inference-router
+  template:
+    metadata:
+      labels:
+        app: inference-router
+    spec:
+      containers:
+        - name: router
+          image: node:20-alpine
+          command:
+            - node
+            - /app/index.js
+          env:
+            - name: CHICAGO_VLLM_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: router-config
+                  key: CHICAGO_VLLM_URL
+            - name: SEATTLE_VLLM_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: router-config
+                  key: SEATTLE_VLLM_URL
+            - name: ALLOWED_ADMIN_CIDR
+              valueFrom:
+                configMapKeyRef:
+                  name: router-config
+                  key: ALLOWED_ADMIN_CIDR
+            - name: HEALTH_CHECK_INTERVAL
+              valueFrom:
+                configMapKeyRef:
+                  name: router-config
+                  key: HEALTH_CHECK_INTERVAL
+            - name: PORT
+              value: "8080"
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          volumeMounts:
+            - name: app-code
+              mountPath: /app
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: app-code
+          configMap:
+            name: router-app-code
+
+---
+# The actual router JS code is injected as a ConfigMap
+# Built by deploy-all.sh which reads from router/src/index.js
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: router-app-code
+  namespace: inference
+data:
+  index.js: |
+    // Placeholder — replaced by deploy-all.sh with router/src/index.js content
+    const http = require('http');
+    http.createServer((req, res) => {
+      res.end('Router not deployed yet. Run: make deploy-all');
+    }).listen(8080);
