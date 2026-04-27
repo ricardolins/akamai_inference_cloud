@@ -34,6 +34,9 @@ fermyon/dist/
 fermyon/variables.toml
 fermyon/deploy-vars.toml
 
+# Terraform plan binaries
+terraform/tfplan*
+
 # k6 results
 k6/results/
 *.json.gz
