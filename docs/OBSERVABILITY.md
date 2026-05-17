@@ -125,6 +125,212 @@ rate(vllm:generation_tokens_total[1m]) / DCGM_FI_DEV_FB_USED
 85 - DCGM_FI_DEV_GPU_TEMP
 ```
 
+## Demo: Métricas ao Vivo com Prometheus
+
+Roteiro passo a passo para demonstrar observabilidade end-to-end durante o demo.
+
+### 1. Acesso ao Prometheus (port-forward)
+
+Prometheus usa NodePort — sem IP externo dedicado. Use port-forward local:
+
+```bash
+# Chicago
+kubectl --kubeconfig=kubeconfig-chicago.yaml \
+  port-forward -n monitoring \
+  svc/prometheus-kube-prometheus-prometheus 9090:9090
+
+# Seattle
+kubectl --kubeconfig=kubeconfig-seattle.yaml \
+  port-forward -n monitoring \
+  svc/prometheus-kube-prometheus-prometheus 9091:9090
+```
+
+Acesse em `http://localhost:9090` (Chicago) e `http://localhost:9091` (Seattle).
+
+---
+
+### 2. Verificar targets ativos
+
+No Prometheus UI → **Status → Targets**, ou via API:
+
+```bash
+curl -s http://localhost:9090/api/v1/targets | \
+  python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for t in data['data']['activeTargets']:
+    print(t['health'], t['labels'].get('job','?'))
+"
+```
+
+Targets esperados ativos (`up`):
+
+| Job | O que coleta |
+|-----|-------------|
+| `vllm` | Latência, throughput, filas de inferência |
+| `nvidia-dcgm-exporter` | GPU util, VRAM, temperatura, power |
+| `node-exporter` | CPU, memória, disco, rede do nó |
+| `kubelet` | Métricas do runtime Kubernetes |
+| `kube-state-metrics` | Estado dos recursos (pods, deployments) |
+| `apiserver` | API server do cluster |
+
+> **Nota:** `kube-proxy` aparece como DOWN — esperado no LKE (porta 10249 fechada). Sem impacto funcional.
+
+---
+
+### 3. Warm-up: enviar requests de inferência
+
+As métricas de latência e throughput do vLLM só aparecem após requisições. Envie um burst de teste:
+
+```bash
+# Via Fermyon router (multi-região)
+ROUTER="https://17f18a23-dee8-456c-b825-7929f04c04ca.fwf.app"
+
+for i in $(seq 1 10); do
+  curl -s -X POST "$ROUTER/v1/chat/completions" \
+    -H "Content-Type: application/json" \
+    -d "{\"model\":\"mistralai/Mistral-7B-Instruct-v0.3\",
+         \"messages\":[{\"role\":\"user\",\"content\":\"Explique GPU inference em uma frase\"}],
+         \"max_tokens\":50}" \
+    -o /dev/null &
+done
+wait
+echo "Burst concluído"
+
+# Ou direto no Chicago
+for i in $(seq 1 10); do
+  curl -s -X POST "http://172.238.162.106:8000/v1/chat/completions" \
+    -H "Content-Type: application/json" \
+    -d "{\"model\":\"mistralai/Mistral-7B-Instruct-v0.3\",
+         \"messages\":[{\"role\":\"user\",\"content\":\"What is GPU inference?\"}],
+         \"max_tokens\":30}" \
+    -o /dev/null &
+done
+wait
+```
+
+---
+
+### 4. Queries de demo — copie e cole no Prometheus UI
+
+#### Latência de inferência (TTFT p50 / p95 / p99)
+
+```promql
+# Time to First Token — p50
+histogram_quantile(0.50, rate(vllm:time_to_first_token_seconds_bucket[5m]))
+
+# p95
+histogram_quantile(0.95, rate(vllm:time_to_first_token_seconds_bucket[5m]))
+
+# p99
+histogram_quantile(0.99, rate(vllm:time_to_first_token_seconds_bucket[5m]))
+```
+
+Valores de referência observados (RTX 4000 Ada, Mistral 7B FP16):
+
+| Percentil | Valor típico |
+|-----------|-------------|
+| p50 | ~56 ms |
+| p95 | ~80 ms |
+| p99 | ~120 ms |
+
+#### Throughput de tokens
+
+```promql
+# Tokens gerados por segundo
+rate(vllm:generation_tokens_total[1m])
+
+# Tokens de prompt por segundo
+rate(vllm:prompt_tokens_total[1m])
+```
+
+#### Latência end-to-end
+
+```promql
+# Latência média da requisição completa
+rate(vllm:e2e_request_latency_seconds_sum[1m])
+/ rate(vllm:e2e_request_latency_seconds_count[1m])
+
+# p95
+histogram_quantile(0.95, rate(vllm:e2e_request_latency_seconds_bucket[5m]))
+```
+
+Valor de referência: ~234 ms para `max_tokens=5`.
+
+#### Estado da fila e concorrência
+
+```promql
+# Requests aguardando na fila
+vllm:num_requests_waiting
+
+# Requests sendo processados agora
+vllm:num_requests_running
+
+# KV Cache utilization (%)
+vllm:gpu_cache_usage_perc * 100
+```
+
+#### GPU — RTX 4000 Ada (20GB VRAM)
+
+```promql
+# Utilização da GPU (%)
+DCGM_FI_DEV_GPU_UTIL
+
+# VRAM usada (GB)
+DCGM_FI_DEV_FB_USED / 1024
+
+# VRAM livre (GB)
+DCGM_FI_DEV_FB_FREE / 1024
+
+# Temperatura (°C) — limite térmico: 85°C
+DCGM_FI_DEV_GPU_TEMP
+
+# Power draw (W) — TDP: 130W
+DCGM_FI_DEV_POWER_USAGE
+```
+
+#### Eficiência GPU
+
+```promql
+# Tokens/s por % de utilização GPU
+rate(vllm:generation_tokens_total[1m]) / (DCGM_FI_DEV_GPU_UTIL / 100)
+
+# Headroom térmico até o limite de 85°C
+85 - DCGM_FI_DEV_GPU_TEMP
+```
+
+---
+
+### 5. Demo multi-região side-by-side
+
+Com os dois port-forwards ativos (9090 = Chicago, 9091 = Seattle), abra dois terminais e compare:
+
+```bash
+# Chicago
+curl -s "http://localhost:9090/api/v1/query" \
+  --data-urlencode 'query=DCGM_FI_DEV_GPU_UTIL' | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); print('Chicago GPU:', d['data']['result'][0]['value'][1], '%')"
+
+# Seattle
+curl -s "http://localhost:9091/api/v1/query" \
+  --data-urlencode 'query=DCGM_FI_DEV_GPU_UTIL' | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); print('Seattle GPU:', d['data']['result'][0]['value'][1], '%')"
+```
+
+---
+
+### 6. Contexto para a audiência
+
+Durante o demo, os pontos de narrativa:
+
+- **TTFT < 100ms** — viável para aplicações interativas em tempo real
+- **GPU util durante inferência** — demonstra que a carga de trabalho realmente usa a GPU (não CPU fallback)
+- **VRAM: ~14GB usados dos 20GB disponíveis** — Mistral 7B FP16 ocupa 13.5GB de pesos + buffers KV cache
+- **Temperatura estável** — workloads de inferência são mais previsíveis que training, temperatura permanece abaixo de 80°C
+- **Multi-região**: latências similares em Chicago e Seattle validam que o modelo foi carregado corretamente nas duas regiões
+
+---
+
 ## Alert Rules (add to Prometheus)
 
 ```yaml

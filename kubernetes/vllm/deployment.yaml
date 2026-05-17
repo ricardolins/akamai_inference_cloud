@@ -26,24 +26,6 @@ stringData:
   token: ""
 
 ---
-# PVC for model cache — avoids re-downloading 14GB on every pod restart
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: vllm-model-cache
-  namespace: inference
-  labels:
-    app: vllm
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      # Mistral 7B FP16 = ~14GB. 50GB provides headroom for model swaps.
-      storage: 50Gi
-  storageClassName: linode-block-storage-retain
-
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -139,8 +121,6 @@ spec:
             - "$(DTYPE)"
             - "--served-model-name"
             - "$(MODEL_NAME)"
-            # Disable usage stats (no external calls)
-            - "--disable-log-stats"
             # Trust remote code for some models (set to false for safety unless needed)
             # - "--trust-remote-code"
 
@@ -190,6 +170,8 @@ spec:
             # Disable vLLM analytics
             - name: VLLM_NO_USAGE_STATS
               value: "1"
+            - name: PROMETHEUS_MULTIPROC_DIR
+              value: "/tmp/prom_multiproc"
 
           ports:
             - name: api
@@ -211,6 +193,8 @@ spec:
               mountPath: /model-cache
             - name: shm
               mountPath: /dev/shm
+            - name: prom-multiproc
+              mountPath: /tmp/prom_multiproc
 
           # vLLM takes 3-8 min to start (model loading)
           startupProbe:
@@ -239,10 +223,11 @@ spec:
 
       volumes:
         - name: model-cache
-          persistentVolumeClaim:
-            claimName: vllm-model-cache
-        # Shared memory for PyTorch tensor operations
+          emptyDir:
+            sizeLimit: 60Gi
         - name: shm
           emptyDir:
             medium: Memory
             sizeLimit: 4Gi
+        - name: prom-multiproc
+          emptyDir: {}
