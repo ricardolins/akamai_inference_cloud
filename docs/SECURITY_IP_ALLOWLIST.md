@@ -2,7 +2,13 @@
 
 ## Principle
 
-**Zero 0.0.0.0/0 exposure.** Every service is restricted to `allowed_admin_cidr`.
+**Zero 0.0.0.0/0 exposure by default.** Every service is restricted to `allowed_admin_cidr`.
+
+The one documented exception is vLLM port 8000 in Chicago, intentionally opened to
+`0.0.0.0/0` to let the Zuplo AI Gateway (which has no fixed egress IP) reach it for
+the foodedge chat demo — see [Layer 5 — vLLM API Key](#layer-5--vllm-api-key-application-level)
+for how that's still protected, and [Opening a Port for a No-Fixed-IP
+Caller](#opening-a-port-for-a-no-fixed-ip-caller-eg-zuplo) for how to revert it.
 
 ## Defense Layers
 
@@ -70,6 +76,91 @@ Returns `403 Forbidden` with JSON error for any non-allowed IP.
 - Kubeconfig files contain cluster admin certificates
 - Keep `kubeconfig-chicago.yaml` and `kubeconfig-seattle.yaml` private (gitignored)
 - Rotate via: `linode-cli lke kubeconfig-delete <cluster-id>`
+
+### Layer 5 — vLLM API Key (application-level)
+
+IP allowlisting assumes the caller has a stable, known source IP. That breaks down for
+callers running on distributed edge platforms (Akamai Functions, Cloudflare Workers,
+Zuplo's AI Gateway, ...) — they don't publish a small fixed egress CIDR, so there's no
+IP to allow. For those callers, vLLM authenticates the *request* instead of the *network
+path*, via vLLM's built-in `--api-key` flag (Bearer token, checked before the request
+reaches the model).
+
+**Setup (per region):**
+
+```bash
+# 1. Generate a random key and store it as a Kubernetes Secret (never commit it)
+VLLM_KEY=$(openssl rand -hex 32)
+kubectl create secret generic vllm-auth --from-literal=api-key="${VLLM_KEY}" \
+  -n inference --context=<chicago|seattle>
+```
+
+`kubernetes/vllm/deployment.yaml` reads it into `VLLM_API_KEY` via `secretKeyRef` and
+passes it as `--api-key "$(VLLM_API_KEY)"` to the vLLM entrypoint. Both regions share
+the same secret value so the same key works against either LoadBalancer.
+
+**Verify:**
+
+```bash
+# Without the key → 401
+curl -i http://<VLLM-LB-IP>:8000/v1/models
+
+# With the key → 200
+curl -i -H "Authorization: Bearer <VLLM_KEY>" http://<VLLM-LB-IP>:8000/v1/models
+```
+
+**Using it from an edge gateway (e.g. Zuplo AI Gateway):** point the provider's base
+URL at the NodeBalancer's public hostname, not its bare IP — Cloudflare Workers (and
+by extension Zuplo, which runs on Workers) refuse outbound `fetch()` calls to raw IP
+literals (`error code: 1003`). Linode gives every NodeBalancer a resolvable hostname
+for free:
+
+```bash
+curl -H "Authorization: Bearer $LINODE_TOKEN" \
+  https://api.linode.com/v4/nodebalancers/<id> | jq -r .hostname
+# → 172-237-133-120.ip.linodeusercontent.com
+```
+
+Use `http://<that-hostname>:8000/v1` as the base URL and the raw key (no `Bearer `
+prefix — the gateway adds that) as the API key field.
+
+This layer does not replace Layers 1–2 — keep the network restricted to
+`allowed_admin_cidr` whenever the caller *does* have a stable IP. Only relax the
+network layer (see below) when the caller genuinely can't be identified by IP, and
+rely on the API key as the real gate at that point.
+
+### Opening a Port for a No-Fixed-IP Caller (e.g. Zuplo)
+
+Only do this once the target service has its own application-level auth (Layer 5,
+above) — otherwise this *is* the 0.0.0.0/0 exposure the rest of this doc warns against.
+
+```bash
+# 1. Kubernetes Service — widen loadBalancerSourceRanges for that region only
+kubectl patch svc vllm -n inference --context=<region> \
+  -p '{"spec":{"loadBalancerSourceRanges":["0.0.0.0/0"]}}'
+
+# 2. Cloud Firewall — widen just the one inbound rule for that region's firewall,
+#    via the Linode API (PUT replaces the whole rule set, so fetch-modify-PUT):
+curl -s -H "Authorization: Bearer $LINODE_TOKEN" \
+  https://api.linode.com/v4/networking/firewalls/<firewall-id>/rules > rules.json
+# edit the "allow-public-vllm" rule's addresses.ipv4 to ["0.0.0.0/0"] in rules.json
+curl -X PUT -H "Authorization: Bearer $LINODE_TOKEN" -H "Content-Type: application/json" \
+  -d @rules.json https://api.linode.com/v4/networking/firewalls/<firewall-id>/rules
+```
+
+**To revert** (restore admin-only access once the caller is no longer needed):
+
+```bash
+kubectl patch svc vllm -n inference --context=<region> \
+  -p '{"spec":{"loadBalancerSourceRanges":["'"${ADMIN_CIDR}"'"]}}'
+# then repeat the fetch-modify-PUT above with addresses.ipv4 = ["<ADMIN_CIDR>"]
+```
+
+This is a deliberate one-off (`kubectl patch` + direct Linode API call), not a
+Terraform change — `terraform/firewall.tf` and `kubernetes/vllm/service.yaml` stay
+admin-only, so a routine `terraform apply` / `make deploy-all` won't accidentally
+make this permanent, and won't silently revert it either — it has to be done by hand
+on both sides.
 
 ## Automated Security Validation
 

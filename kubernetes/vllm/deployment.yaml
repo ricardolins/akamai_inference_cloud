@@ -36,8 +36,9 @@ metadata:
     app.kubernetes.io/part-of: akai-inference
     version: v0.6.3
 spec:
-  # Single replica: one GPU per node, one node per cluster
-  replicas: 1
+  # One replica per GPU node in the cluster. Substituted per-region by deploy-all.sh
+  # (Chicago: 1 node/1 replica. Seattle: 2 nodes/2 replicas.)
+  replicas: VLLM_REPLICAS_PLACEHOLDER
   selector:
     matchLabels:
       app: vllm
@@ -72,24 +73,10 @@ spec:
       # conflicts with vLLM's own VLLM_PORT integer env var)
       enableServiceLinks: false
 
-      initContainers:
-        # Wait for GPU Operator to finish setting up the device plugin
-        - name: wait-for-gpu
-          image: bitnami/kubectl:latest
-          command:
-            - /bin/sh
-            - -c
-            - |
-              echo "Waiting for GPU device plugin to be ready..."
-              until kubectl get node -o jsonpath='{.items[0].status.allocatable.nvidia\.com/gpu}' | grep -q "1"; do
-                echo "  GPU not ready yet, waiting 10s..."
-                sleep 10
-              done
-              echo "GPU is ready."
-          resources:
-            requests:
-              memory: "64Mi"
-              cpu: "50m"
+      # No init container needed to wait for the GPU device plugin: the
+      # scheduler only binds this pod to a node once nvidia.com/gpu is
+      # allocatable there (see the resources.requests below), so by the
+      # time this pod is Scheduled the device plugin is already ready.
 
       containers:
         - name: vllm
@@ -121,6 +108,8 @@ spec:
             - "$(DTYPE)"
             - "--served-model-name"
             - "$(MODEL_NAME)"
+            - "--api-key"
+            - "$(VLLM_API_KEY)"
             # Trust remote code for some models (set to false for safety unless needed)
             # - "--trust-remote-code"
 
@@ -161,6 +150,11 @@ spec:
                   name: hf-secret
                   key: token
                   optional: true
+            - name: VLLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vllm-auth
+                  key: api-key
             # HuggingFace cache directory — mapped to PVC
             - name: HF_HOME
               value: "/model-cache"

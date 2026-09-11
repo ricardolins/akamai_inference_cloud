@@ -26,6 +26,25 @@ locals {
   admin_ip = var.allowed_admin_cidr
 }
 
+# ── NodeBalancers ─────────────────────────────────────────────────────────────
+# LKE's cloud-controller-manager provisions a NodeBalancer per LoadBalancer
+# Service (Grafana, vLLM, ...). These aren't Terraform-managed resources, so
+# discover them by region/tag and attach the firewall to all of them.
+
+data "linode_nodebalancers" "chicago" {
+  filter {
+    name   = "region"
+    values = [var.chicago_region]
+  }
+}
+
+data "linode_nodebalancers" "seattle" {
+  filter {
+    name   = "region"
+    values = [var.seattle_region]
+  }
+}
+
 # ── Chicago Firewall ──────────────────────────────────────────────────────────
 
 resource "linode_firewall" "chicago" {
@@ -52,13 +71,13 @@ resource "linode_firewall" "chicago" {
     ipv4     = [local.admin_ip]
   }
 
-  # Allow vLLM inference API from anywhere — router (Akamai Functions) enforces allowlist
+  # Allow vLLM inference API from admin IP only
   inbound {
     label    = "allow-public-vllm"
     action   = "ACCEPT"
     protocol = "TCP"
     ports    = "8000"
-    ipv4     = ["0.0.0.0/0"]
+    ipv4     = [local.admin_ip]
   }
 
   # Allow Grafana from admin IP only
@@ -124,8 +143,9 @@ resource "linode_firewall" "chicago" {
     ipv4     = ["192.168.128.0/17"]
   }
 
-  # Attach this firewall to all Chicago GPU nodes
-  linodes = module.chicago.node_instance_ids
+  # Attach this firewall to all Chicago GPU nodes and NodeBalancers
+  linodes       = module.chicago.node_instance_ids
+  nodebalancers = [for nb in data.linode_nodebalancers.chicago.nodebalancers : nb.id]
 }
 
 # ── Seattle Firewall ──────────────────────────────────────────────────────────
@@ -157,7 +177,7 @@ resource "linode_firewall" "seattle" {
     action   = "ACCEPT"
     protocol = "TCP"
     ports    = "8000"
-    ipv4     = ["0.0.0.0/0"]
+    ipv4     = [local.admin_ip]
   }
 
   inbound {
@@ -216,5 +236,6 @@ resource "linode_firewall" "seattle" {
     ipv4     = ["192.168.128.0/17"]
   }
 
-  linodes = module.seattle.node_instance_ids
+  linodes       = module.seattle.node_instance_ids
+  nodebalancers = [for nb in data.linode_nodebalancers.seattle.nodebalancers : nb.id]
 }

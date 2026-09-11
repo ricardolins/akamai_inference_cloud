@@ -53,6 +53,12 @@ variable "gpu_nodes_per_cluster" {
   default     = 1
 }
 
+variable "seattle_gpu_node_count" {
+  description = "GPU node count override for Seattle only. Defaults to gpu_nodes_per_cluster."
+  type        = number
+  default     = 1
+}
+
 # ── Kubernetes ────────────────────────────────────────────────────────────────
 
 variable "k8s_version" {

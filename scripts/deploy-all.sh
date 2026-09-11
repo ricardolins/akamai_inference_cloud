@@ -124,13 +124,19 @@ deploy_region() {
   # 3. vLLM
   info "[${ctx}] Deploying vLLM..."
 
-  # Substitute IP allowlist placeholder in service manifest
-  local vllm_svc
+  # One vLLM replica per GPU node in this cluster's pool
+  local vllm_replicas="1"
+  [[ "${ctx}" == "seattle" ]] && vllm_replicas="2"
+
+  # Substitute IP allowlist and replica count placeholders
+  local vllm_svc vllm_deploy
   vllm_svc=$(sed "s|ALLOWED_ADMIN_CIDR_PLACEHOLDER|${ALLOWED_CIDR}|g" \
     "${K8S_DIR}/vllm/service.yaml")
+  vllm_deploy=$(sed "s|VLLM_REPLICAS_PLACEHOLDER|${vllm_replicas}|g" \
+    "${K8S_DIR}/vllm/deployment.yaml")
 
   kubectl apply -f "${K8S_DIR}/vllm/configmap.yaml" --context="${ctx}"
-  kubectl apply -f "${K8S_DIR}/vllm/deployment.yaml" --context="${ctx}"
+  echo "${vllm_deploy}" | kubectl apply -f - --context="${ctx}"
   echo "${vllm_svc}" | kubectl apply -f - --context="${ctx}"
 
   # 4. Prometheus

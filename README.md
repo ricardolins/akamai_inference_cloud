@@ -15,8 +15,8 @@ Production-grade, multi-region AI inference environment on Akamai Cloud (Linode)
 
 ## Security First
 
-**Zero 0.0.0.0/0 exposure.**  
-All services (vLLM, Grafana, Prometheus, Router) are restricted to `allowed_admin_cidr`.
+**Zero 0.0.0.0/0 exposure by default.**  
+Admin-facing services (Grafana, Prometheus, Router, Kubernetes API, SSH) are restricted to `allowed_admin_cidr`. vLLM additionally requires an `--api-key` Bearer token, which lets it also be called by edge platforms with no fixed IP (e.g. a Zuplo AI Gateway) without opening the network layer to everyone — see [docs/SECURITY_IP_ALLOWLIST.md](docs/SECURITY_IP_ALLOWLIST.md).
 
 ```hcl
 allowed_admin_cidr = "YOUR_PUBLIC_IP/32"
@@ -30,19 +30,23 @@ Client (your IP only)
 Fermyon Router (or Node.js fallback)
   ↓
   ├── Chicago (us-ord)
-  │     ├── LKE cluster
+  │     ├── LKE cluster — 1 GPU node
   │     ├── GPU RTX 4000 Ada
   │     ├── NVIDIA GPU Operator + DCGM
-  │     ├── vLLM  →  :8000
+  │     ├── vLLM  →  :8000  (1 replica, --api-key protected)
   │     ├── Prometheus  →  :9090
   │     └── Grafana  →  :3000
   └── Seattle (us-sea)
-        ├── LKE cluster
+        ├── LKE cluster — 2 GPU nodes
         ├── GPU RTX 4000 Ada
         ├── NVIDIA GPU Operator + DCGM
-        ├── vLLM  →  :8000
+        ├── vLLM  →  :8000  (2 replicas, one per node, --api-key protected)
         ├── Prometheus  →  :9090
         └── Grafana  →  :3000
+
+External AI Gateway path (separate project, foodedge demo chat):
+  Browser → foodedge (Akamai Functions) → Zuplo AI Gateway
+    → vLLM :8000 (Authorization: Bearer <api-key>, no IP check)
 ```
 
 ## Quick Start

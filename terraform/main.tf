@@ -26,7 +26,7 @@ module "seattle" {
   region         = var.seattle_region
   k8s_version    = var.k8s_version
   gpu_node_type  = var.gpu_node_type
-  gpu_node_count = var.gpu_nodes_per_cluster
+  gpu_node_count = var.seattle_gpu_node_count
   tags           = concat(var.tags, ["region-seattle", "us-sea"])
 }
 
