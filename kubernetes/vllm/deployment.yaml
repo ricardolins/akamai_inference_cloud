@@ -164,8 +164,12 @@ spec:
             # Disable vLLM analytics
             - name: VLLM_NO_USAGE_STATS
               value: "1"
-            - name: PROMETHEUS_MULTIPROC_DIR
-              value: "/tmp/prom_multiproc"
+            # Do NOT set PROMETHEUS_MULTIPROC_DIR — vLLM manages its own multiproc
+            # dir internally and wipes it between runs. Setting it ourselves left a
+            # stale dir that silently broke the TTFT/e2e-latency histograms while
+            # simple counters kept working. See vLLM's own startup warning:
+            # "Found PROMETHEUS_MULTIPROC_DIR was set by user... Unset the variable
+            # and vLLM will properly handle cleanup."
 
           ports:
             - name: api
@@ -187,8 +191,6 @@ spec:
               mountPath: /model-cache
             - name: shm
               mountPath: /dev/shm
-            - name: prom-multiproc
-              mountPath: /tmp/prom_multiproc
 
           # vLLM takes 3-8 min to start (model loading)
           startupProbe:
@@ -223,5 +225,3 @@ spec:
           emptyDir:
             medium: Memory
             sizeLimit: 4Gi
-        - name: prom-multiproc
-          emptyDir: {}
