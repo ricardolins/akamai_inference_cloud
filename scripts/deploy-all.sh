@@ -162,7 +162,7 @@ deploy_region() {
 
   # Create dashboard ConfigMap
   kubectl create configmap grafana-dashboards \
-    --from-file="${K8S_DIR}/monitoring/dashboards/gpu-inference-dashboard.json" \
+    --from-file="${K8S_DIR}/monitoring/dashboards/vllm-gpu.json" \
     --namespace monitoring \
     --context="${ctx}" \
     --dry-run=client -o yaml | kubectl apply -f - --context="${ctx}"
