@@ -12,6 +12,7 @@ Production-grade, multi-region AI inference environment on Akamai Cloud (Linode)
 | Fermyon Spin + Node.js Fallback Router | Multi-region routing |
 | k6 | Performance + failover testing |
 | Linode Cloud Firewall | IP-restricted access |
+| Ray Serve (KubeRay) | Multi-model serving demo — toggles onto Chicago's GPU, see [docs/RAY_SERVE.md](docs/RAY_SERVE.md) |
 
 ## Security First
 
@@ -107,6 +108,7 @@ http://<CHICAGO-LB-IP>:9090
 - [Multi-region Routing](docs/MULTIREGION_ROUTING.md)
 - [Observability](docs/OBSERVABILITY.md)
 - [Performance Testing](docs/PERFORMANCE_TESTING.md)
+- [Ray Serve Demo](docs/RAY_SERVE.md)
 - [Security / IP Allowlist](docs/SECURITY_IP_ALLOWLIST.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Limitations](docs/LIMITATIONS.md)

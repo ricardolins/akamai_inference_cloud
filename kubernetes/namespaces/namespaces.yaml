@@ -29,3 +29,15 @@ metadata:
   labels:
     app.kubernetes.io/part-of: akai-inference
     purpose: gpu-lifecycle
+
+---
+# Ray Serve demo — Chicago only. Shares Chicago's single GPU node with vLLM;
+# only one of the two can hold the GPU at a time (toggle via `make demo-ray-on/off`).
+# See docs/RAY_SERVE.md.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ray-serve
+  labels:
+    app.kubernetes.io/part-of: akai-inference
+    purpose: ray-serve-demo

@@ -4,6 +4,8 @@
 
 Multi-region AI inference with automatic failover, GPU-accelerated inference, and full observability. Admin-facing services (Grafana, Prometheus, Kubernetes API, SSH) are IP-restricted — no domain, no DNS, IP only. vLLM additionally supports an application-level API key (see [Security Layers](#security-layers)) so it can also be called by edge platforms that have no fixed IP, such as the Zuplo AI Gateway used by the foodedge demo.
 
+Chicago's single GPU node is also **toggleable** between raw vLLM and a Ray Serve demo of the same model (`make demo-ray-on` / `make demo-ray-off`) — see [RAY_SERVE.md](RAY_SERVE.md). Only one of the two holds the GPU at a time; Seattle is unaffected either way.
+
 ## Topology
 
 ```

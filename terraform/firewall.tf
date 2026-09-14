@@ -143,6 +143,17 @@ resource "linode_firewall" "chicago" {
     ipv4     = ["192.168.128.0/17"]
   }
 
+  # Ray Serve demo dashboard (Chicago only — see kubernetes/ray-serve/, docs/RAY_SERVE.md)
+  # Appended last so the diff stays purely additive (Terraform treats `inbound`
+  # as an ordered list; inserting mid-list makes it rewrite later blocks in place).
+  inbound {
+    label    = "allow-admin-ray-dashboard"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "8265"
+    ipv4     = [local.admin_ip]
+  }
+
   # Attach this firewall to all Chicago GPU nodes and NodeBalancers
   linodes       = module.chicago.node_instance_ids
   nodebalancers = [for nb in data.linode_nodebalancers.chicago.nodebalancers : nb.id]

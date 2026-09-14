@@ -1,0 +1,127 @@
+# =============================================================================
+# ray-serve/rayservice.yaml — Ray Serve LLM demo (Chicago only)
+#
+# Serves the SAME model vLLM already serves (mistralai/Mistral-7B-Instruct-v0.3),
+# so the demo is apples-to-apples: "same GPU, same model, different serving engine."
+#
+# GPU CONSTRAINT: Chicago has exactly one GPU node, already used by vLLM
+# (kubernetes/vllm/deployment.yaml). The worker group below starts at
+# replicas: 0 — it does NOT claim the GPU on `kubectl apply`. Toggle it on/off
+# with `make demo-ray-on` / `make demo-ray-off` (scripts/toggle-ray-demo.sh),
+# which also scales vLLM to 0 first so the two never fight over the one GPU.
+# See docs/RAY_SERVE.md.
+# =============================================================================
+
+apiVersion: ray.io/v1
+kind: RayService
+metadata:
+  name: ray-serve-llm
+  namespace: ray-serve
+  labels:
+    app.kubernetes.io/part-of: akai-inference
+spec:
+  serveConfigV2: |
+    applications:
+      - name: llms
+        import_path: ray.serve.llm:build_openai_app
+        route_prefix: "/"
+        args:
+          llm_configs:
+            - model_loading_config:
+                model_id: mistralai/Mistral-7B-Instruct-v0.3
+                model_source: mistralai/Mistral-7B-Instruct-v0.3
+              engine_kwargs:
+                dtype: float16
+                max_model_len: 4096
+                gpu_memory_utilization: 0.90
+                tensor_parallel_size: 1
+              deployment_config:
+                autoscaling_config:
+                  min_replicas: 1
+                  max_replicas: 1
+                max_ongoing_requests: 16
+
+  rayClusterConfig:
+    rayVersion: "2.59.0"
+
+    headGroupSpec:
+      serviceType: ClusterIP
+      rayStartParams:
+        dashboard-host: "0.0.0.0"
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: akai-inference
+          annotations:
+            prometheus.io/scrape: "true"
+            prometheus.io/port: "8080"
+        spec:
+          # Head is CPU-only — no GPU request, doesn't touch the GPU budget.
+          containers:
+            - name: ray-head
+              image: rayproject/ray-llm:2.59.0.bfe9b7-py312-cu130
+              ports:
+                - containerPort: 6379
+                  name: gcs
+                - containerPort: 8265
+                  name: dashboard
+                - containerPort: 10001
+                  name: client
+                - containerPort: 8000
+                  name: serve
+                - containerPort: 8080
+                  name: metrics
+              # Chicago's single node is already ~82% CPU-allocated (vLLM + gpu-operator
+              # + node agents) — keep the head's request small, it's idle control-plane
+              # most of the time.
+              resources:
+                requests:
+                  cpu: "300m"
+                  memory: "1Gi"
+                limits:
+                  cpu: "1"
+                  memory: "3Gi"
+
+    workerGroupSpecs:
+      - groupName: gpu-workers
+        # Starts at 0 on purpose — see the GPU CONSTRAINT note above.
+        replicas: 0
+        minReplicas: 0
+        maxReplicas: 1
+        rayStartParams: {}
+        template:
+          metadata:
+            labels:
+              app.kubernetes.io/part-of: akai-inference
+            annotations:
+              prometheus.io/scrape: "true"
+              prometheus.io/port: "8080"
+          spec:
+            # Same GPU scheduling pattern as kubernetes/vllm/deployment.yaml —
+            # lands on Chicago's one GPU node, once vLLM has released it.
+            tolerations:
+              - key: "nvidia.com/gpu"
+                operator: "Exists"
+                effect: "NoSchedule"
+            nodeSelector:
+              nvidia.com/gpu.present: "true"
+            containers:
+              - name: ray-worker
+                image: rayproject/ray-llm:2.59.0.bfe9b7-py312-cu130
+                resources:
+                  requests:
+                    nvidia.com/gpu: "1"
+                    cpu: "2"
+                    memory: "8Gi"
+                  limits:
+                    nvidia.com/gpu: "1"
+                    cpu: "3500m"
+                    memory: "12Gi"
+                volumeMounts:
+                  - name: shm
+                    mountPath: /dev/shm
+            volumes:
+              - name: shm
+                emptyDir:
+                  medium: Memory
+                  sizeLimit: 4Gi

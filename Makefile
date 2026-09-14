@@ -57,6 +57,9 @@ help:
 	@echo "  start-local-router  Run multi-region router locally (port 8080)"
 	@echo "  logs-vllm-chicago   Stream vLLM logs from Chicago"
 	@echo "  logs-vllm-seattle   Stream vLLM logs from Seattle"
+	@echo ""
+	@echo "  demo-ray-on         Swap Chicago's GPU from vLLM to Ray Serve"
+	@echo "  demo-ray-off        Swap Chicago's GPU back from Ray Serve to vLLM"
 	@echo "  ─────────────────────────────────────────────────────────────"
 	@echo ""
 
@@ -212,3 +215,12 @@ pods:
 	@echo ""
 	@echo "=== Pods — Seattle ==="
 	@$(KUBECTL_SEA) get pods -A 2>/dev/null
+
+# ── Ray Serve demo (Chicago only, shares the one GPU node with vLLM) ──────────
+.PHONY: demo-ray-on
+demo-ray-on:
+	@bash $(SCRIPTS_DIR)/toggle-ray-demo.sh on
+
+.PHONY: demo-ray-off
+demo-ray-off:
+	@bash $(SCRIPTS_DIR)/toggle-ray-demo.sh off
